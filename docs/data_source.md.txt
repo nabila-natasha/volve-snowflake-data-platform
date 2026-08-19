@@ -1,0 +1,184 @@
+# Data Sources
+
+This document describes the external datasets used by the Volve Oil & Gas Data Platform.
+
+---
+
+# 1. Volve Field Production Data
+
+## Description
+
+The Volve dataset contains historical production and operational information associated with the Volve field in the North Sea.
+
+The dataset contains daily and monthly worksheets and provides well-level information suitable for production analytics.
+
+## Usage in This Project
+
+The dataset is used for:
+
+- Oil production
+- Gas production
+- Water production
+- Well-level production trends
+- Production decline
+- Water-cut analysis
+- Choke analysis
+- Wellhead pressure analysis
+- Downtime analysis
+
+## Granularity
+
+The primary analytical grain is daily production at well level.
+
+This allows the project to perform:
+
+```text
+Well
++
+Date
++
+Production Measures
+```
+
+analysis.
+
+## Source Handling
+
+The source workbook was downloaded locally during development.
+
+The original source workbook is not committed to GitHub.
+
+---
+
+# 2. EIA Brent Crude Oil Price Data
+
+## Provider
+
+U.S. Energy Information Administration (EIA)
+
+## API
+
+EIA Open Data API
+
+## Data Type
+
+Historical daily Brent crude oil benchmark price.
+
+## Usage
+
+The dataset is used to calculate indicative production value:
+
+```text
+Oil Production
+×
+Brent Benchmark Price
+=
+Indicative Production Value
+```
+
+## API Workflow
+
+```text
+EIA API
+   ↓
+HTTP Request
+   ↓
+JSON Response
+   ↓
+Python
+   ↓
+Raw JSON
+   ↓
+Snowflake VARIANT
+   ↓
+LATERAL FLATTEN
+   ↓
+Relational Price Table
+```
+
+## Why Brent?
+
+The Volve field is located in the North Sea.
+
+Brent is therefore a more appropriate benchmark for this project than WTI because Brent is strongly associated with North Sea and international crude pricing.
+
+The benchmark should still not be interpreted as the actual realized Volve selling price.
+
+---
+
+# 3. Frankfurter USD/NOK FX Data
+
+## Provider
+
+Frankfurter API
+
+## Data
+
+Historical USD/NOK exchange rates.
+
+## Usage
+
+The FX data demonstrates integration of an additional external API into the Snowflake platform.
+
+The data can support:
+
+- Currency conversion
+- External market-data integration
+- API ingestion
+- Time-series analysis
+
+---
+
+# 4. Data Integration
+
+The three datasets are integrated conceptually as:
+
+```text
+Volve Production
+       |
+       +----------------+
+                        |
+Brent Price ------------+----> Gold Economic Analysis
+                        |
+USD/NOK FX -------------+
+```
+
+The primary economic analysis uses oil production and Brent benchmark prices.
+
+---
+
+# 5. Source Data Limitations
+
+The project does not attempt to reproduce:
+
+- Realized oil sales prices
+- Commercial contracts
+- Quality differentials
+- Transportation costs
+- Royalties
+- Taxes
+- Operating costs
+- Hedging
+- Official field economics
+
+Therefore, the economic outputs are described as **indicative production value**.
+
+---
+
+# 6. Credential Handling
+
+API credentials are not stored in this repository.
+
+The EIA API key is provided through an environment variable during development.
+
+No API key should be placed directly inside source code or GitHub.
+
+---
+
+# 7. Reproducibility
+
+A user wishing to reproduce the project should obtain the source datasets directly from their respective providers and then follow the ingestion and transformation workflow documented in:
+
+```text
+docs/methodology.md
+```
