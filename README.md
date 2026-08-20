@@ -276,7 +276,7 @@ The FX dataset demonstrates how a second external API can be integrated into the
 
 # Architecture
 
-![Data Pipeline Architecture](architecture/data_pipeline.png)
+![volve-snowflake-data-platform](architecture/data_pipeline.PNG)
 
 The platform follows a layered architecture:
 
