@@ -406,7 +406,7 @@ This demonstrates:
 
 The analytical layer uses a **Star Schema** approach.
 
-![Data Model](architecture/data_model.png)
+![volve-snowflake-data-platform](architecture/data_model.PNG)
 
 The central fact table is:
 
@@ -657,7 +657,7 @@ docs/data_quality.md
 
 # Power BI Dashboard
 
-![Power BI Dashboard](powerbi/dashboard.png)
+![volve-snowflake-data-platform](powerbi/dashboard.PNG)
 
 Power BI connects to the Snowflake Gold layer.
 
