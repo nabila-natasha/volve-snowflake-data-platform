@@ -762,24 +762,27 @@ volve-snowflake-data-platform/
 │   ├── README.md
 │   ├── eia_api.py
 │   ├── fx_api.py
+|   ├── convert_xls_csv.py
 │   └── requirements.txt
 │
 └── snowflake/
     ├── README.md
     │
     ├── sql/
-    │   ├── README.md
-    │   ├── 01_environment_setup.sql
-    │   ├── 02_roles_governance.sql
-    │   ├── 03_bronze.sql
-    │   ├── 04_silver.sql
-    │   ├── 05_dynamic_tables.sql
-    │   ├── 06_gold.sql
-    │   └── 07_analytics.sql
+    │   ├── 01_env_setup.sql
+    │   ├── 02_pipeline.sql
+    │   ├── 03_bronze_load.sql
+    │   ├── 04_bronze_profile.sql
+    │   ├── 05_silver_clean_transform.sql
+    │   ├── 06_bronze_fx_ingest_silver_flatten.sql
+    │   ├── 07_silver_production_batch_2.sql
+    │   ├── 08_gold_dim_tables.sql
+    │   ├── 09_gold_fact_table.sql
+    │   ├── 10_gold_derived_tables.sql
+    │   └── 11_governance.sql
     │
     └── python/
-        ├── README.md
-        └── bronze_profiling.py
+        └── 04_pandas_profile.py
 ```
 
 ---
@@ -921,7 +924,6 @@ volve-snowflake-data-platform/
 - Production decline
 - Water-cut analysis
 - Choke analysis
-- Wellhead pressure analysis
 - Downtime analysis
 - Well ranking
 - Commodity-price analysis
