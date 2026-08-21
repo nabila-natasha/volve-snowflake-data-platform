@@ -1,8 +1,8 @@
 # Volve Oil & Gas Data Platform
 
-An end-to-end oil & gas data platform and analytics project built with **Snowflake, Python, REST APIs, JSON, Dynamic Tables, SQL, and Power BI**.
+An end-to-end oil & gas data platform and analytics project built with **Snowflake (Iceberg Tables, Dynamic Tables), Python, REST APIs, JSON, SQL, and Power BI**.
 
-This project demonstrates how publicly available oil & gas production data and external market data can be ingested, transformed, governed, modelled, and served as an analytical data platform.
+This project demonstrates how publicly available oil & gas production data and external market data can be ingested, cleaned, governed, modelled, and served as an analytical data platform — including working through and documenting real data-quality issues along the way, rather than starting from a pre-cleaned dataset.
 
 The project uses historical **Volve field production data**, **Brent crude oil benchmark prices from the U.S. Energy Information Administration (EIA) Open Data API**, and **USD/NOK foreign exchange rates from the Frankfurter API**.
 
@@ -12,9 +12,7 @@ The project uses historical **Volve field production data**, **Brent crude oil b
 
 The central business question addressed by this project is:
 
-> **How does well-level oil production performance change over time, and what is the indicative production value when external crude-oil market prices are applied?**
-
-The project simulates an oil & gas production analytics platform from source ingestion through to business intelligence.
+> **How does well-level oil production performance change over time, and what is the indicative production value when external crude-oil market prices are applied — and how much of that value change is driven by production volume versus market price?**
 
 The overall workflow is:
 
@@ -27,11 +25,11 @@ Snowflake Bronze
     ↓
 Snowflake VARIANT / JSON Processing
     ↓
-Silver Transformation
+Silver Transformation (Iceberg Tables)
     ↓
 Dynamic Tables
     ↓
-Gold Analytical Model
+Gold Analytical Model (Star Schema)
     ↓
 Power BI
 ```
@@ -50,16 +48,7 @@ The project demonstrates both **data engineering** and **analytics engineering**
 
 > How does oil, gas, and water production change over time at well level and field level?
 
-The analysis examines:
-
-- Oil production trends
-- Gas production trends
-- Water production trends
-- Well-level production trajectories
-- Field-wide production trends
-- Production decline patterns
-
-This provides a simplified production decline analysis and demonstrates time-series analysis using real historical production data.
+The analysis examines oil, gas, and water production trends at both well and field level, providing a simplified production decline analysis using real historical production data.
 
 ---
 
@@ -78,9 +67,9 @@ Water Production
 Oil Production + Water Production
 ```
 
-Increasing water cut can indicate changing well or reservoir behaviour.
+Note: this is a **volume-weighted** ratio (sum of water ÷ sum of total liquid over the period), not a naive average of daily ratios — averaging pre-computed daily percentages directly would distort the result by giving equal weight to low-volume and high-volume days.
 
-The analysis identifies wells where water contribution increases relative to total liquid production.
+Increasing water cut can indicate reservoir maturity / water breakthrough. The analysis identifies wells where water contribution increases relative to total liquid production over time.
 
 ---
 
@@ -90,13 +79,7 @@ The analysis identifies wells where water contribution increases relative to tot
 
 > Is there an observable relationship between choke size, wellhead pressure, and oil production rate?
 
-The project combines operational measurements with production data to investigate:
-
-- Choke size
-- Wellhead pressure
-- Oil production rate
-
-This demonstrates how operational variables can be analysed alongside production outcomes.
+The project combines choke size (% opening), average wellhead pressure, and oil production rate to investigate operational choke-management behaviour alongside production outcomes.
 
 ---
 
@@ -104,17 +87,11 @@ This demonstrates how operational variables can be analysed alongside production
 
 **Question:**
 
-> How much production was associated with downtime or shut-in periods?
+> How much production was associated with downtime or shut-in periods, and were shut-ins concentrated in short, clustered events or long, scattered ones?
 
-The analysis examines:
+Consecutive shut-in days are grouped into discrete downtime **events** (not just a count of shut-in days) using a gaps-and-islands SQL pattern, giving each event a start date, end date, and duration. This distinguishes a few short maintenance-style events from a small number of long outages.
 
-- Shut-in days
-- Downtime events
-- Downtime duration
-- Production impact
-- Temporal patterns
-
-The project only uses classifications that are supported by the source data and does not infer planned or unplanned causes where such information is unavailable.
+The project only uses classifications supported by the source data and does not infer planned/unplanned causes where that information isn't available.
 
 ---
 
@@ -124,38 +101,17 @@ The project only uses classifications that are supported by the source data and 
 
 **Question:**
 
-> What is the estimated notional production value when historical Brent benchmark prices are applied to oil production?
-
-The basic calculation is:
+> What is the estimated notional production value when historical Brent benchmark prices are applied to oil production, in both USD and NOK?
 
 ```text
-Indicative Production Value
+Indicative Production Value (USD)
 =
-Oil Production Volume × Brent Benchmark Price
+Oil Production Volume (bbl) × Brent Benchmark Price (USD/bbl)
 ```
 
-For example:
+Production volume is sourced in Sm³ and explicitly converted to barrels (× 6.2898 bbl/m³, the standard volume conversion factor) before being multiplied against the USD/bbl benchmark price — the two figures cannot be combined directly without this conversion. A NOK-denominated figure is also calculated by applying the historical USD/NOK exchange rate, since Volve is a Norwegian asset that would, in reality, have been managed in NOK.
 
-```text
-1,000 bbl × $70/bbl
-=
-$70,000 indicative value
-```
-
-This is **not realized company revenue**.
-
-The calculation does not account for:
-
-- Crude quality differentials
-- Transportation costs
-- Royalties
-- Taxes
-- Operating expenditure
-- Marketing costs
-- Contractual pricing
-- Realized sales prices
-
-Therefore, the project uses the term **indicative production value** rather than actual revenue.
+This is **not realized company revenue**. The calculation excludes crude quality differentials, transportation costs, royalties, taxes, operating expenditure, marketing costs, contractual pricing, and realized sales prices. The dashboard labels this **"Total Revenue"** for readability, but it should be understood throughout as an **indicative / notional value**, not an audited financial figure.
 
 ---
 
@@ -165,14 +121,7 @@ Therefore, the project uses the term **indicative production value** rather than
 
 > Which wells contribute the greatest cumulative indicative production value?
 
-The analysis ranks wells based on cumulative indicative production value.
-
-This supports:
-
-- Well ranking
-- Contribution analysis
-- Pareto analysis
-- Concentration analysis
+Wells are ranked by cumulative indicative value with a running percentage-of-total, supporting Pareto / concentration analysis — i.e. whether value is concentrated in a small number of wells or spread evenly.
 
 ---
 
@@ -182,15 +131,9 @@ This supports:
 
 > How much of the change in indicative production value is associated with production volume versus benchmark price?
 
-The project decomposes changes in indicative value into:
+The project decomposes the change in indicative value into a **production volume effect**, a **price effect**, and a **volume-price interaction term** (since revenue is multiplicative, not additive — a simple two-way split alone does not fully reconcile when both drivers move at the same time). The reconciliation (`volume effect + price effect + interaction = actual change`) was validated directly in SQL.
 
-```text
-Production Volume Effect
-+
-Price Effect
-```
-
-This helps distinguish operational production effects from commodity-market effects.
+**Finding:** across the field's producing life, declining production volume — not falling Brent price — appears to be the larger driver of the reduction in indicative value over time. This is a meaningful distinction: a naive read of the "revenue vs. Brent price" chart alone could wrongly suggest price was the main driver, when the decomposition shows the underlying decline curve was doing more of the work.
 
 ---
 
@@ -198,108 +141,39 @@ This helps distinguish operational production effects from commodity-market effe
 
 **Question:**
 
-> How would indicative field value change under different Brent price assumptions?
+> How would indicative field value change under a different assumed Brent price?
 
-Example scenarios include:
-
-```text
-$50/bbl
-$70/bbl
-$90/bbl
-```
-
-Power BI What-If parameters are used to allow interactive price-sensitivity analysis.
+A Power BI **What-If parameter** lets the user select a Brent price assumption and see recalculated total field value. This is explicitly a **historical sensitivity tool, not a forecast** — it answers "what would this field's value have looked like if Brent had averaged $X," using actual historical production, not a prediction of future prices or volumes.
 
 ---
 
 # Data Sources
 
-The project integrates three main data sources.
-
 ## Volve Production Data
 
-Historical Volve field production and operational data.
-
-The source workbook contains daily and monthly production worksheets.
-
-The dataset is used for:
-
-- Oil production
-- Gas production
-- Water production
-- Well-level analysis
-- Production decline
-- Water cut
-- Choke analysis
-- Wellhead pressure analysis
-- Downtime analysis
-
-The original source dataset is not redistributed in this repository.
-
----
+Historical Volve field daily and monthly production/operational data (oil, gas, water volumes, choke size, wellhead pressure, well type). The original source workbook is not redistributed in this repository.
 
 ## EIA Brent Crude Oil Prices
 
-Historical Brent crude oil benchmark prices are retrieved through the **U.S. Energy Information Administration Open Data API**.
-
-The API returns nested JSON data.
-
-The raw API response is stored in Snowflake using the `VARIANT` data type before being transformed into relational columns.
-
-The processing pattern is:
+Retrieved via the U.S. Energy Information Administration Open Data API (nested JSON). Note: the EIA API paginates results at 5,000 records per call — retrieving the full historical series required iterating through multiple pages rather than a single request.
 
 ```text
-EIA REST API
-    ↓
-JSON Response
-    ↓
-Python
-    ↓
-Snowflake Bronze
-    ↓
-VARIANT
-    ↓
-LATERAL FLATTEN
-    ↓
-Typed Relational Columns
+EIA REST API → JSON Response → Python → Snowflake Bronze → VARIANT → LATERAL FLATTEN → Typed Relational Columns
 ```
-
----
 
 ## USD/NOK Foreign Exchange Rates
 
-Historical USD/NOK exchange rates are retrieved using the Frankfurter API.
-
-The FX dataset demonstrates how a second external API can be integrated into the same analytical platform.
+Retrieved via the Frankfurter API, demonstrating a second, structurally different external API integrated into the same platform (a flat array of records, versus EIA's nested object-with-array response — handled with a different `LATERAL FLATTEN` pattern).
 
 ---
 
 # Architecture
 
-![volve-snowflake-data-platform](architecture/data_pipeline.PNG)
-
-The platform follows a layered architecture:
-
 ```text
-SOURCE
-   ↓
-INGESTION
-   ↓
-BRONZE
-   ↓
-SILVER
-   ↓
-DYNAMIC TABLES
-   ↓
-GOLD
-   ↓
-POWER BI
+SOURCE → INGESTION → BRONZE → SILVER (Iceberg) → DYNAMIC TABLES → GOLD (Star Schema) → POWER BI
 ```
 
-Detailed architecture documentation is available in:
-
-- `architecture/README.md`
-- `docs/methodology.md`
+Detailed architecture documentation is available in `architecture/README.md` and `docs/methodology.md`.
 
 ---
 
@@ -307,56 +181,25 @@ Detailed architecture documentation is available in:
 
 ## Bronze Layer
 
-The Bronze layer preserves source data in a relatively raw form.
-
-It contains:
-
-- Raw production data
-- Raw Brent API payloads
-- Raw FX API payloads
-
-For semi-structured API data, the raw JSON payload is stored in a Snowflake `VARIANT` column.
-
----
+Preserves source data in raw form. Columns are deliberately kept as `STRING` (not typed) at this stage — typing too early means a single malformed value could fail an entire load. Semi-structured API payloads (Brent, FX) are stored whole in a `VARIANT` column, unflattened.
 
 ## Silver Layer
 
-The Silver layer standardizes and cleans source data.
+Standardizes and cleans Bronze data: type casting (`TRY_TO_DATE`, `TRY_TO_DECIMAL` — tolerant of bad values, converting them to NULL rather than failing the load), date-format resolution, an encoding fix (mangled UTF-8 characters in a facility name), exclusion of a hidden units-metadata row embedded in the monthly production file, and forward/backward-filling of Brent and FX prices onto non-trading days (weekends/holidays) using `LAST_VALUE`/`FIRST_VALUE` window functions.
 
-Typical transformations include:
-
-- Data-type conversion
-- Date standardization
-- Column standardization
-- Null handling
-- Duplicate handling
-- Business-rule transformations
-- Data validation
-- Joining related datasets
-
----
+Several Silver tables (`DAILY_PRODUCTION_CLEAN`, `MONTHLY_PRODUCTION_CLEAN`, `BRENT_PRICES`, `BRENT_PRICES_FILLED`) are built as **Snowflake-managed Iceberg Tables** — genuine Iceberg-format (Parquet + metadata) tables, using Snowflake's own managed catalog and storage rather than an external S3 volume, since this project was built without an AWS account. This means the format is open, but the storage location is not currently externally reachable by another engine (e.g. Databricks) — pairing this with an external volume on cloud storage would be the natural next step for true multi-engine access. The raw `VARIANT` Bronze tables are kept as standard (non-Iceberg) tables, since Iceberg's structured format is not a good fit for semi-structured `VARIANT` columns.
 
 ## Dynamic Tables
 
-Snowflake Dynamic Tables are used in the transformation layer to demonstrate declarative data transformation and automatic maintenance of derived datasets.
+Used in the transformation layer for declarative, automatically-refreshed derived datasets — a `TARGET_LAG` is set once, and Snowflake manages the refresh schedule and (where possible) incremental computation.
 
-The Dynamic Tables sit between the transformed Silver data and analytical Gold datasets.
+Incremental behaviour was explicitly tested: an initial batch of production data was loaded, the full Dynamic Table chain built on top, and a second batch was inserted into Silver afterward — confirming the Gold layer picked up the new records automatically without any change to the transformation SQL.
 
-```text
-Silver
-   ↓
-Dynamic Tables
-   ↓
-Gold
-```
-
----
+One nuance worth noting: `DOWNTIME_EVENTS` uses a window function (`ROW_NUMBER()` over an unbounded, date-ordered partition) to group consecutive shut-in days into discrete events. This pattern cannot support Snowflake's incremental refresh — a single new row can shift the ranking of every later row in the same partition — so this table runs in `FULL` refresh mode, while the rest of the Gold layer refreshes incrementally. This is expected, not a defect.
 
 ## Gold Layer
 
-The Gold layer contains analytical datasets designed for Power BI consumption.
-
-The main Gold objects are:
+Analytical datasets designed for Power BI consumption, following a **Star Schema**:
 
 ```text
 FACT_PRODUCTION
@@ -371,13 +214,35 @@ WELL_VALUE_RANKING
 
 ---
 
+# Dimensional Modelling
+
+## FACT_PRODUCTION
+
+Daily well-level production observations: oil/gas/water volume (Sm³ and converted bbl), choke size, wellhead pressure, shut-in flag, Brent price, FX rate, and indicative revenue in both USD and NOK.
+
+## DIM_WELL
+
+Descriptive well-level attributes (field, facility, first/last producing date).
+
+**Slowly Changing Dimension (SCD) note:** some wells changed classification (producer ↔ injector) over their lifetime. `DIM_WELL` uses **SCD Type 1** — each well's most recent known attributes — after quantifying that the alternative (using the well's current label to filter historical fact rows) would have affected only ~0.22% of historical producing revenue, since `FACT_PRODUCTION` already retains the accurate `well_type` at daily grain independently of the dimension table. A working **SCD Type 2** implementation (change detection via `LAG()`, versioning via a running `SUM()`, surrogate key, effective date ranges) is included separately under `snowflake/sql/` to demonstrate the pattern for cases where the fact table doesn't already retain the accurate historical value.
+
+## DIM_DATE
+
+A complete calendar-date dimension (generated via a date spine, not just distinct production dates, so it has no gaps — required for Power BI's date-table time-intelligence functions) with year, quarter, month, and month-start attributes.
+
+---
+
+# Analytical Gold Tables
+
+- **WELL_DECLINE_TREND** — monthly oil/gas/water volume and shut-in day count, per well.
+- **WATER_CUT_TREND** — volume-weighted monthly water cut, per well.
+- **DOWNTIME_EVENTS** — discrete shut-in events (start, end, duration) via gaps-and-islands grouping.
+- **REVENUE_DECOMPOSITION** — monthly indicative value (USD & NOK) against an annual baseline, decomposed into volume effect, price effect, and interaction term. Uses a **volume-weighted average Brent price**, not a naive daily average, so low-volume days with an unusual price don't distort the figure.
+- **WELL_VALUE_RANKING** — wells ranked by cumulative indicative value (USD & NOK) with running percentage of total, for Pareto/concentration analysis.
+
+---
+
 # Semi-Structured Data Processing
-
-The EIA API provides nested JSON.
-
-The project demonstrates how Snowflake can store and process this data without requiring immediate flattening outside the data warehouse.
-
-Example transformation:
 
 ```sql
 SELECT 
@@ -391,346 +256,77 @@ LATERAL FLATTEN(
 ) f;
 ```
 
-This demonstrates:
-
-- `VARIANT`
-- JSON path expressions
-- `LATERAL FLATTEN`
-- Semi-structured data
-- Type casting
-- Relational transformation
-
----
-
-# Dimensional Modelling
-
-The analytical layer uses a **Star Schema** approach.
-
-![volve-snowflake-data-platform](architecture/data_model.PNG)
-
-The central fact table is:
-
-```text
-FACT_PRODUCTION
-```
-
-with supporting dimensions:
-
-```text
-DIM_WELL
-DIM_DATE
-```
-
-Additional analytical tables are derived from the core production and market datasets.
-
----
-
-## FACT_PRODUCTION
-
-Contains measurable production observations.
-
-Typical measures include:
-
-- Oil volume
-- Gas volume
-- Water volume
-- Production days
-- Shut-in indicators
-- Choke measurements
-- Wellhead pressure
-
----
-
-## DIM_WELL
-
-Contains descriptive well-level attributes.
-
-This dimension allows production metrics to be analysed by well and well characteristics.
-
----
-
-## DIM_DATE
-
-Provides a standard date dimension for time-series analysis.
-
-It supports:
-
-- Year
-- Quarter
-- Month
-- Date
-- Time-based filtering
-- Time-based aggregation
-
----
-
-# Analytical Gold Tables
-
-## WELL_DECLINE_TREND
-
-Supports:
-
-- Oil production decline
-- Gas production trends
-- Water production trends
-- Well-level production trajectories
-- Field-wide production analysis
-
----
-
-## WATER_CUT_TREND
-
-Supports:
-
-- Water-cut trends
-- Well comparisons
-- Increasing water contribution
-- Potential water breakthrough indicators
-
----
-
-## DOWNTIME_EVENTS
-
-Supports:
-
-- Shut-in analysis
-- Downtime duration
-- Operational interruptions
-- Production impact
-
----
-
-## REVENUE_DECOMPOSITION
-
-Supports:
-
-- Indicative production value
-- Brent price effects
-- Production-volume effects
-- Price-volume analysis
-
-The term "revenue" is used as an analytical model name and does not represent realized company revenue.
-
----
-
-## WELL_VALUE_RANKING
-
-Supports:
-
-- Well ranking
-- Cumulative indicative value
-- Contribution analysis
-- Pareto-style analysis
-- Concentration analysis
+This demonstrates `VARIANT`, JSON path expressions, `LATERAL FLATTEN`, and relational type casting of semi-structured data. The FX source (Frankfurter) uses a structurally different, flat JSON array — flattened with a different `LATERAL FLATTEN` pattern to demonstrate handling more than one semi-structured shape.
 
 ---
 
 # Snowflake Governance
 
-The project demonstrates Snowflake Role-Based Access Control.
-
-The role hierarchy is:
+Role-based access control was designed around a simulated joint-venture (JV) scenario common in oil & gas — an operator and outside partners seeing different levels of detail on the same asset.
 
 ```text
 SYSADMIN
     ↓
-TB_ADMIN
+VOLVE_DE          -- pipeline/developer role: owns all objects, full read/write across Bronze/Silver/Gold
     ↓
-TB_DATA_ENGINEER
-    ├── TB_DEV
-    └── TB_ANALYST
+VOLVE_ANALYST     -- internal analyst role: full read access to Gold
+VOLVE_VIEWER      -- simulated JV partner role: restricted read access to Gold
 ```
 
-The project demonstrates:
+Implemented and validated:
 
-- Custom roles
-- Role hierarchy
-- Database privileges
-- Schema privileges
-- Object-level privileges
-- Role inheritance
-- Least-privilege concepts
+- **Row Access Policy** on `FACT_PRODUCTION` restricting `VOLVE_VIEWER` to a subset of wells (simulating non-operated interest visibility)
+- **Dynamic Data Masking** nulling a sensitive operational column (wellhead pressure) for `VOLVE_VIEWER`
+- **Object tagging** documenting which columns are governed and why
+- Validated by running the identical query as each role and comparing the different results directly, rather than only describing the policy
+- Warehouse-to-role mapping (separate load/transform vs. BI-read warehouses) and a resource monitor for cost governance
 
-Governance SQL is available under:
-
-```text
-snowflake/sql/
-```
+Governance SQL is available under `snowflake/sql/`.
 
 ---
 
 # Python and API Ingestion
 
-Python is used to retrieve external API data.
+Python is used for the ingestion side of the pipeline, not for in-warehouse transformation:
 
-The ingestion scripts demonstrate:
-
-- REST API requests
-- HTTP status handling
-- Query parameters
-- JSON responses
-- Environment variables
-- Raw JSON persistence
-- Error handling
-
-The general workflow is:
+- Converting the raw Excel production workbook to CSV (`pandas`/`openpyxl`)
+- Calling the EIA and Frankfurter REST APIs (`requests`), handling pagination (EIA), inspecting the real response shape before writing any downstream SQL, and persisting the raw JSON
+- A separate exercise profiling Bronze data with `pandas` (null counts, dtype checks, duplicate detection) via a Snowflake Python session — a learning exercise, kept separate from the core transformation pipeline, which is done in SQL
 
 ```text
-Python
-   ↓
-requests.get()
-   ↓
-REST API
-   ↓
-HTTP Response
-   ↓
-response.json()
-   ↓
-Python Object
-   ↓
-Raw JSON File
-```
-
----
-
-# Snowflake Python / pandas Profiling
-
-An additional Snowflake Python exercise was developed to profile Bronze data using pandas.
-
-The profiling exercise demonstrates:
-
-- Snowflake Python
-- pandas
-- DataFrame operations
-- Null analysis
-- Data type inspection
-- Descriptive statistics
-- Basic data-quality profiling
-
-This component is primarily a learning exercise and is separate from the core transformation pipeline.
-
-The implementation is available under:
-
-```text
-snowflake/python/
+Python → requests.get() → REST API → response.json() → Raw JSON File → Snowflake Stage
 ```
 
 ---
 
 # Data Quality
 
-Data quality is considered throughout the pipeline.
+Data quality was treated as an explicit, documented part of the pipeline, not an afterthought. Findings included:
 
-The project examines:
+- A **unit mismatch**: production volume (Sm³) was initially multiplied directly against a USD/bbl price with no conversion, overstating every revenue figure by roughly 6x — caught via a magnitude sanity-check and fixed with the standard bbl/m³ conversion factor, applied consistently through every downstream table.
+- A **hidden units-metadata row** in the monthly production file, disguised as a data row directly beneath the header — identified during profiling and explicitly excluded with a documented `WHERE` clause rather than a silent drop.
+- A **text-encoding issue** in a facility name, and a **date-format ambiguity** resolved by explicitly validating the source format before casting.
+- A **reconciliation check** between the independently-reported daily and monthly production sources — summed daily volumes were compared against reported monthly totals, using a percentage-variance threshold (not exact-match) to account for expected rounding differences between independently-measured sources, flagging any well-month exceeding the threshold for review.
+- **Weekend/holiday gaps** in the Brent price series (prices are only quoted on trading days, while wells produce every day) — resolved via forward-fill with a backward-fill fallback for the series' earliest dates.
 
-- Completeness
-- Validity
-- Uniqueness
-- Temporal consistency
-- Referential integrity
-- Missing values
-- Duplicate records
-- Production-value validity
-- Market-price alignment
-
-The general approach is:
-
-```text
-Profile
-   ↓
-Validate
-   ↓
-Transform
-   ↓
-Validate Again
-   ↓
-Gold
-```
-
-Detailed documentation is available in:
-
-```text
-docs/data_quality.md
-```
+The general approach: Profile → Validate → Transform → Validate Again → Gold. Detailed documentation is available in `docs/data_quality.md`.
 
 ---
 
 # Power BI Dashboard
 
-![volve-snowflake-data-platform](powerbi/dashboard.PNG)
+Power BI connects to the Snowflake Gold layer (via the `VOLVE_ANALYST` role). The dashboard is organized around the business questions above, not generic charts:
 
-Power BI connects to the Snowflake Gold layer.
+- **KPI strip** — Oil Production (bbl), Total Revenue (USD), Total Revenue (NOK), Uptime (%)
+- **What-If Analysis** — Brent price scenario slicer, recalculating total field revenue; explicitly labelled as historical sensitivity, not a forecast
+- **Production Decline by Well** — oil/gas/water volume trend per well over time
+- **Revenue Performance vs. Brent Price** — total revenue against average Brent price over time; the accompanying decomposition shows declining production volume, not falling price, as the larger driver of the reduction in indicative value — a more precise read than the trend chart alone would suggest
+- **Well Performance: Choke % vs. Oil Rate** — scatter chart, choke size (%) against oil rate, bubble size = average wellhead pressure
+- **Water Cut Trend** — average water cut (%) per well over time, volume-weighted (see Water Cut section above)
+- **Economic Value Ranking of Well** — Pareto-style cumulative value ranking by well
+- **Downtime Events** — discrete shut-in events by well, start date and duration
 
-The dashboard brings together:
-
-- Production
-- Reservoir indicators
-- Operational performance
-- Indicative economics
-
----
-
-## Production Analysis
-
-The dashboard provides:
-
-- Oil production
-- Gas production
-- Water production
-- Field production trends
-- Well production trends
-- Production decline
-
----
-
-## Water Cut Analysis
-
-The dashboard provides:
-
-- Water-cut trends
-- Well comparisons
-- Increasing water-cut indicators
-- High-water-cut wells
-
----
-
-## Operational Analysis
-
-The dashboard provides:
-
-- Choke size
-- Wellhead pressure
-- Oil production rate
-- Shut-in days
-- Downtime events
-
----
-
-## Economic Analysis
-
-The dashboard provides:
-
-- Brent benchmark price
-- Indicative production value
-- Production volume
-- Price-volume decomposition
-- Well value ranking
-
----
-
-## Scenario Analysis
-
-The Power BI What-If parameter allows the user to change the assumed Brent price.
-
-Example scenarios:
-
-```text
-$50/bbl
-$70/bbl
-$90/bbl
-```
-
-This provides an interactive sensitivity-analysis feature.
+All DAX measures use explicit aggregation logic (e.g. `DIVIDE(SUM(water), SUM(oil)+SUM(water))` for water cut, volume-weighted price averaging) rather than relying on default column aggregation, which would silently miscalculate ratio-based metrics.
 
 ---
 
@@ -762,7 +358,7 @@ volve-snowflake-data-platform/
 │   ├── README.md
 │   ├── eia_api.py
 │   ├── fx_api.py
-|   ├── convert_xls_csv.py
+│   ├── convert_xls_csv.py
 │   └── requirements.txt
 │
 └── snowflake/
@@ -779,7 +375,8 @@ volve-snowflake-data-platform/
     │   ├── 08_gold_dim_tables.sql
     │   ├── 09_gold_fact_table.sql
     │   ├── 10_gold_derived_tables.sql
-    │   └── 11_governance.sql
+    │   ├── 11_governance.sql
+    │   └── 12_dim_well_scd2_demo.sql
     │
     └── python/
         └── 04_pandas_profile.py
@@ -789,347 +386,74 @@ volve-snowflake-data-platform/
 
 # Technology Stack
 
-## Data Platform
+**Data Platform:** Snowflake, Snowflake Dynamic Tables, Snowflake-Managed Iceberg Tables, Snowflake VARIANT, Snowflake RBAC (Row Access Policies, Dynamic Data Masking), Snowflake Python
 
-- Snowflake
-- Snowflake Dynamic Tables
-- Snowflake VARIANT
-- Snowflake RBAC
-- Snowflake Python
+**Programming:** Python, pandas, requests, SQL
 
-## Programming
+**Data Integration:** REST APIs, JSON, Excel
 
-- Python
-- pandas
-- requests
-- SQL
+**Data Modelling:** Star Schema, Fact/Dimension Tables, Slowly Changing Dimensions (Type 1 & Type 2)
 
-## Data Integration
-
-- REST APIs
-- JSON
-- Excel
-
-## Data Modelling
-
-- Star Schema
-- Fact Tables
-- Dimension Tables
-- Dimensional Modelling
-
-## Analytics
-
-- Power BI
-- DAX
-- What-If Parameters
-- Time-Series Analysis
-
----
-
-# End-to-End Data Flow
-
-```text
-                       SOURCE SYSTEMS
-                             |
-             +---------------+---------------+
-             |               |               |
-             v               v               v
-         Volve Excel      EIA API       Frankfurter API
-             |             Brent              FX
-             |               |               |
-             +---------------+---------------+
-                             |
-                             v
-                     Python Ingestion
-                             |
-                             v
-                    Snowflake Bronze
-                             |
-                 +-----------+-----------+
-                 |                       |
-                 v                       v
-          Production Data          JSON / VARIANT
-                                         |
-                                         v
-                                  LATERAL FLATTEN
-                                         |
-                                         v
-                                      Silver
-                                         |
-                                         v
-                                  Dynamic Tables
-                                         |
-                                         v
-                                       Gold
-                                         |
-                                         v
-                                     Power BI
-                                         |
-                                         v
-                                  Business Insights
-```
+**Analytics:** Power BI, DAX, What-If Parameters, Time-Series Analysis
 
 ---
 
 # Key Skills Demonstrated
 
-## Data Engineering
+**Data Engineering:** end-to-end platform design, ingestion, transformation, Bronze/Silver/Gold architecture, external API integration (incl. pagination handling), semi-structured data processing, data-quality investigation and remediation
 
-- End-to-end data platform design
-- Data ingestion
-- Data transformation
-- Bronze / Silver / Gold architecture
-- External API integration
-- Semi-structured data processing
-- Data modelling
+**Snowflake:** databases, schemas, warehouses, custom roles and role hierarchy, grants, RBAC, Row Access Policies, Dynamic Data Masking, object tagging, resource monitors, VARIANT, JSON, LATERAL FLATTEN, Dynamic Tables (incl. incremental vs. full refresh behaviour), Snowflake-Managed Iceberg Tables, Snowflake Python
 
-## Snowflake
+**Python:** REST APIs, requests, pagination handling, JSON, environment variables, file handling, error handling, pandas
 
-- Databases
-- Schemas
-- Warehouses
-- Roles
-- Role hierarchy
-- Grants
-- RBAC
-- VARIANT
-- JSON
-- LATERAL FLATTEN
-- Dynamic Tables
-- Snowflake Python
+**SQL:** CTEs, joins, aggregations, window functions (LAG, ROW_NUMBER, running SUM, gaps-and-islands grouping), date functions, JSON path expressions, LATERAL FLATTEN, SCD Type 1 & Type 2 implementation, reconciliation logic
 
-## Python
+**Analytics:** production decline, water-cut analysis, choke/pressure analysis, downtime-event analysis, well ranking, commodity-price decomposition (volume/price/interaction), scenario analysis
 
-- REST APIs
-- requests
-- JSON
-- Environment variables
-- File handling
-- Error handling
-- pandas
-
-## SQL
-
-- CTEs
-- JOINs
-- Aggregations
-- Window functions
-- Date functions
-- JSON path expressions
-- LATERAL FLATTEN
-- Data transformations
-
-## Analytics
-
-- Production decline
-- Water-cut analysis
-- Choke analysis
-- Downtime analysis
-- Well ranking
-- Commodity-price analysis
-- Price-volume decomposition
-- Scenario analysis
-
-## Power BI
-
-- Snowflake connectivity
-- Dimensional modelling
-- DAX
-- Measures
-- Time-series visualisation
-- What-If parameters
-- Interactive dashboard design
+**Power BI:** Snowflake connectivity, dimensional modelling, DAX (incl. weighted-average and time-intelligence measures), What-If parameters, interactive dashboard design
 
 ---
 
 # Why Brent?
 
-The Volve field is located in the North Sea.
-
-Brent is therefore used as the external benchmark for the indicative economic analysis because Brent is a major international crude-oil benchmark associated with the North Sea and international crude pricing.
-
-However, the analysis should not be interpreted as the actual realized selling price of Volve crude.
-
-The project does not model:
-
-- Crude quality differentials
-- Transportation costs
-- Contractual pricing
-- Realized sales prices
-- Field-specific commercial terms
+Volve is located in the North Sea. Brent is used as the external benchmark because it is the major international crude-oil benchmark associated with the North Sea and international crude pricing. The analysis should not be interpreted as the actual realized selling price of Volve crude — see Economic Disclaimer below.
 
 ---
 
 # Project Limitations
 
-This is an educational portfolio project based on publicly available historical data.
-
-It is not intended to reproduce a complete commercial oil & gas production platform.
-
-The results should not be interpreted as:
-
-- Official reservoir-engineering conclusions
-- Official production accounting
-- Financial reporting
-- Commercial asset valuation
-- Investment advice
-- Realized company revenue
-
-The project focuses on demonstrating data engineering and analytical methodology.
+This is an educational portfolio project based on publicly available historical data. It is not intended to reproduce a complete commercial oil & gas production platform, and results should not be interpreted as official reservoir-engineering conclusions, production accounting, financial reporting, commercial asset valuation, or investment advice.
 
 ---
 
 # Economic Disclaimer
 
-The economic calculations represent **indicative / notional production value** calculated from oil production volume and benchmark Brent prices.
-
-They do not represent realized revenue.
-
-The calculations exclude:
-
-- Quality differentials
-- Transportation
-- Royalties
-- Taxes
-- Operating expenditure
-- Marketing costs
-- Contractual pricing
-- Realized sales prices
-- Hedging effects
-- Other commercial adjustments
+The economic calculations represent **indicative / notional production value**, labelled "Total Revenue" on the dashboard for readability. They do not represent realized revenue. The calculations exclude quality differentials, transportation, royalties, taxes, operating expenditure, marketing costs, contractual pricing, realized sales prices, hedging effects, and other commercial adjustments.
 
 ---
 
 # Data and Security Disclaimer
 
-This project uses publicly available data and external APIs for educational and portfolio purposes.
-
-The original Volve source dataset is not redistributed in this repository.
-
-API credentials, Snowflake passwords, company credentials, access tokens, and other secrets must never be committed to GitHub.
-
-The EIA API key is supplied through an environment variable during development and is intentionally excluded from this repository.
-
-No company-private or confidential data should be included in this project.
+This project uses publicly available data and external APIs for educational and portfolio purposes. The original Volve source dataset is not redistributed in this repository. API credentials, Snowflake passwords, and other secrets are never committed to GitHub — the EIA API key is supplied via an environment variable during development. No company-private or confidential data is included in this project.
 
 ---
 
 # Snowflake Trial Account Disclaimer
 
-This project was developed primarily using a **Snowflake trial account** for learning and portfolio purposes.
-
-The Snowflake environment used during development is temporary and may no longer be available after the trial period ends.
-
-The GitHub repository therefore preserves the project independently of the temporary Snowflake environment.
-
-The repository preserves:
-
-- Architecture
-- SQL scripts
-- Transformation logic
-- Dynamic Table definitions
-- Governance scripts
-- Python ingestion scripts
-- Data-quality methodology
-- Data-model documentation
-- Power BI dashboard output
-
-The SQL scripts may require environment-specific configuration when recreated in another Snowflake account.
-
----
-
-# Reproducibility
-
-A new user can conceptually reproduce the project using the following workflow:
-
-```text
-1. Obtain the Volve source dataset
-        ↓
-2. Obtain an EIA API key
-        ↓
-3. Configure environment variables
-        ↓
-4. Run Python API ingestion
-        ↓
-5. Create Snowflake environment
-        ↓
-6. Create roles and privileges
-        ↓
-7. Load Bronze data
-        ↓
-8. Process JSON using VARIANT / FLATTEN
-        ↓
-9. Build Silver transformations
-        ↓
-10. Create Dynamic Tables
-        ↓
-11. Build Gold analytical model
-        ↓
-12. Connect Power BI
-        ↓
-13. Build analytical dashboard
-```
-
-Detailed methodology and source information are documented under:
-
-```text
-docs/
-```
-
----
-
-# Portfolio Outcome
-
-The completed platform demonstrates an end-to-end workflow from **source ingestion to business-facing analytics**.
-
-The final architecture combines:
-
-```text
-Operational Data
-       +
-External Market Data
-       ↓
-Python / REST APIs
-       ↓
-Snowflake
-       ↓
-VARIANT / JSON
-       ↓
-LATERAL FLATTEN
-       ↓
-Silver Transformations
-       ↓
-Dynamic Tables
-       ↓
-Gold Star Schema
-       ↓
-RBAC / Governance
-       ↓
-Power BI
-       ↓
-Production & Economic Insights
-```
-
-The project demonstrates how a small, independently developed cloud data platform can be designed around a realistic oil & gas analytical use case.
+This project was developed using a **Snowflake trial account**. The environment used during development is temporary and may no longer be available after the trial period ends. The GitHub repository preserves the project independently of the temporary Snowflake environment — architecture, SQL scripts, transformation and governance logic, Dynamic Table definitions, Python ingestion scripts, data-quality methodology, data-model documentation, and Power BI dashboard output. SQL scripts may require environment-specific configuration when recreated in another Snowflake account.
 
 ---
 
 # Project Status
 
-**Completed**
-
-The core project has been completed using a temporary Snowflake trial environment and Power BI.
-
-The GitHub repository preserves the project architecture, source code, SQL transformations, data-model design, governance examples, analytical methodology, and Power BI output.
+**Completed.** The core project has been completed using a temporary Snowflake trial environment and Power BI. The GitHub repository preserves the project architecture, source code, SQL transformations, data-model design, governance implementation, data-quality methodology, and Power BI output.
 
 ---
 
 # Author
 
 **Nabila Natasha**
-
 Data Analyst | Data Engineering & Analytics
 
 Personal portfolio project demonstrating practical experience with:
-
-**Snowflake • SQL • Python • REST APIs • JSON • Dynamic Tables • Data Modelling • Power BI • Oil & Gas Analytics**
+**Snowflake (Iceberg Tables, Dynamic Tables) • SQL • Python • REST APIs • JSON • Data Modelling (Star Schema, SCD) • Governance (RBAC/RLS/Masking) • Power BI • Oil & Gas Analytics**
