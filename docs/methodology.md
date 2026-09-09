@@ -1,0 +1,419 @@
+# Data Platform Methodology
+
+This document describes the methodology used to build the Volve Oil & Gas Data Platform.
+
+---
+
+# 1. Architecture Approach
+
+The platform follows a layered architecture:
+
+```text
+Source
+  ↓
+Ingestion
+  ↓
+Bronze
+  ↓
+Silver
+  ↓
+Dynamic Tables
+  ↓
+Gold
+  ↓
+Power BI
+```
+
+The objective is to separate:
+
+- Raw data
+- Cleaned data
+- Business transformations
+- Analytical datasets
+- Business intelligence
+
+---
+
+# 2. Source Ingestion
+
+Two ingestion approaches are used.
+
+## Local Production Data
+
+The Volve production workbook is downloaded locally and processed before being loaded into Snowflake.
+
+## External APIs
+
+External market data is retrieved using Python.
+
+The API workflow is:
+
+```text
+Python
+   ↓
+requests
+   ↓
+REST API
+   ↓
+HTTP Response
+   ↓
+JSON
+   ↓
+Raw File
+   ↓
+Snowflake
+```
+
+---
+
+# 3. Bronze Layer
+
+The Bronze layer is designed to preserve source information with minimal transformation.
+
+For structured data:
+
+```text
+Source Table
+   ↓
+Bronze Table
+```
+
+For JSON:
+
+```text
+Raw JSON
+   ↓
+VARIANT
+```
+
+The Bronze layer provides a recovery and traceability point before downstream transformation.
+
+---
+
+# 4. JSON and VARIANT Processing
+
+The EIA Brent API returns nested JSON.
+
+Instead of immediately normalizing the JSON externally, the raw payload is stored in Snowflake using `VARIANT`.
+
+Example structure:
+
+```text
+response
+  |
+  +-- total
+  |
+  +-- frequency
+  |
+  +-- data
+       |
+       +-- observation 1
+       +-- observation 2
+       +-- observation 3
+```
+
+The `data` array is flattened using:
+
+```sql
+LATERAL FLATTEN
+```
+
+Example:
+
+```sql
+SELECT 
+    f.value:period::DATE AS price_date,
+    f.value:value::FLOAT AS brent_usd_bbl,
+    f.value:"series-description"::STRING AS series_desc,
+    f.value:units::STRING AS units
+FROM BRONZE.BRENT_RAW,
+LATERAL FLATTEN(
+    input => raw_payload:response:data
+) f;
+```
+
+---
+
+# 5. Silver Transformation
+
+Silver transformations standardize the raw data.
+
+Typical transformations include:
+
+- Date casting
+- Numeric casting
+- Column renaming
+- Null handling
+- Duplicate handling
+- Standardized units
+- Business-rule transformations
+- Joining related sources
+
+The Silver layer should be suitable for downstream analytical modelling.
+
+---
+
+# 6. Dynamic Tables
+
+Dynamic Tables are used to demonstrate automated maintenance of derived datasets.
+
+The transformation pattern is:
+
+```text
+Silver
+   ↓
+Dynamic Table
+   ↓
+Derived Gold Dataset
+```
+
+Dynamic Tables are positioned after the cleaned Silver layer rather than in the raw ingestion layer.
+
+This demonstrates how Snowflake can maintain derived datasets according to defined refresh requirements.
+
+---
+
+# 7. Dimensional Modelling
+
+The Gold layer follows a Star Schema approach.
+
+The central fact table is:
+
+```text
+FACT_PRODUCTION
+```
+
+Supporting dimensions include:
+
+```text
+DIM_WELL
+DIM_DATE
+```
+
+This structure separates:
+
+### Facts
+
+Quantitative measurements such as:
+
+- Oil volume
+- Gas volume
+- Water volume
+- Production days
+
+from:
+
+### Dimensions
+
+Descriptive context such as:
+
+- Well
+- Date
+- Well attributes
+
+---
+
+# 8. Fact Table Grain
+
+The primary production fact is designed around a daily well-level grain.
+
+Conceptually:
+
+```text
+One row
+=
+One well
++
+One production date
+```
+
+This grain is important because it determines how production metrics can be aggregated.
+
+---
+
+# 9. Analytical Tables
+
+Derived Gold tables support specific business questions.
+
+```text
+WELL_DECLINE_TREND
+WATER_CUT_TREND
+DOWNTIME_EVENTS
+REVENUE_DECOMPOSITION
+WELL_VALUE_RANKING
+```
+
+Each table is designed around a specific analytical requirement rather than storing every calculation in one large table.
+
+---
+
+# 10. Indicative Production Value
+
+Indicative production value is calculated using:
+
+```text
+Oil Production Volume
+×
+Brent Benchmark Price
+```
+
+The project deliberately labels this as **indicative production value** because it does not represent realized commercial revenue.
+
+---
+
+# 11. Price and Volume Analysis
+
+Changes in indicative value can be analysed using:
+
+```text
+Indicative Value
+=
+Production Volume
+×
+Price
+```
+
+This allows the analysis to separate:
+
+```text
+Volume Effect
++
+Price Effect
+```
+
+and understand whether value changes are associated primarily with production or market prices.
+
+---
+
+# 12. Water Cut
+
+Water cut is calculated as:
+
+```text
+Water Production
+-----------------------------
+Oil Production + Water Production
+```
+
+The metric is calculated at the well/date level before being aggregated for trend analysis.
+
+---
+
+# 13. Downtime
+
+Downtime analysis uses available shut-in and operational information.
+
+The analysis focuses on:
+
+- Event duration
+- Number of events
+- Shut-in days
+- Production impact
+
+The methodology does not infer event causes unless the source data explicitly supports that classification.
+
+---
+
+# 14. Data Quality
+
+Data quality checks are performed throughout the pipeline.
+
+The project considers:
+
+- Completeness
+- Validity
+- Uniqueness
+- Temporal consistency
+- Referential integrity
+- Missing values
+- Duplicate records
+
+Detailed checks are documented in:
+
+```text
+docs/data_quality.md
+```
+
+---
+
+# 15. Power BI
+
+Power BI consumes the Snowflake Gold layer.
+
+The Gold layer is designed to minimize complex transformation logic inside Power BI.
+
+The general architecture is:
+
+```text
+Snowflake Gold
+      ↓
+Power BI
+      ↓
+DAX Measures
+      ↓
+Visualizations
+```
+
+---
+
+# 16. What-If Analysis
+
+Power BI What-If parameters are used for Brent price scenarios.
+
+Example:
+
+```text
+$50/bbl
+$70/bbl
+$90/bbl
+```
+
+The user can adjust the assumed benchmark price and observe the effect on indicative production value.
+
+---
+
+# 17. Design Principles
+
+The project follows several data-platform principles:
+
+### Separation of concerns
+
+Raw ingestion is separated from analytical transformation.
+
+### Reusability
+
+Core Gold datasets are designed to support multiple analytical questions.
+
+### Traceability
+
+Raw data is preserved before major transformations.
+
+### Governance
+
+Access is managed using Snowflake roles and privileges.
+
+### Analytical usability
+
+Gold datasets are structured for downstream BI consumption.
+
+### Security
+
+Credentials are kept outside source code.
+
+---
+
+# 18. Portfolio Scope
+
+This project is intentionally designed as a small individual-developer implementation.
+
+It demonstrates the major concepts of an enterprise-style data platform while keeping the implementation manageable for a portfolio project.
+
+It does not attempt to implement:
+
+- Enterprise orchestration
+- Production-grade CI/CD
+- Multi-region deployment
+- Full infrastructure-as-code
+- Enterprise data catalogues
+- Production monitoring
+- Commercial production accounting
