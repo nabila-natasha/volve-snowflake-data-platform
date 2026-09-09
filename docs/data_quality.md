@@ -1,0 +1,299 @@
+# Data Quality
+
+This document describes the data-quality considerations applied to the Volve Oil & Gas Data Platform.
+
+The objective is to identify potential issues before data reaches the Gold analytical layer.
+
+---
+
+# 1. Data Quality Dimensions
+
+The project considers the following dimensions:
+
+```text
+Completeness
+Validity
+Uniqueness
+Consistency
+Temporal Integrity
+Referential Integrity
+```
+
+---
+
+# 2. Completeness
+
+Completeness checks determine whether expected values are present.
+
+Examples include:
+
+- Missing well names
+- Missing production dates
+- Missing production volumes
+- Missing Brent prices
+- Missing FX rates
+
+Example SQL pattern:
+
+```sql
+SELECT
+    COUNT(*) AS total_rows,
+    COUNT_IF(well_name IS NULL) AS missing_well,
+    COUNT_IF(production_date IS NULL) AS missing_date
+FROM SILVER.DAILY_PRODUCTION_CLEAN;
+```
+
+---
+
+# 3. Validity
+
+Validity checks ensure that values conform to expected data types and reasonable ranges.
+
+Examples include:
+
+- Production volumes should not unexpectedly contain invalid negative values
+- Dates should contain valid dates
+- Brent prices should be numeric
+- Choke values should be interpretable according to source units
+
+---
+
+# 4. Uniqueness
+
+Duplicate records can cause double counting.
+
+The expected production grain is approximately:
+
+```text
+Well + Date
+```
+
+A duplicate check can therefore be performed using:
+
+```sql
+SELECT
+    well_name,
+    production_date,
+    COUNT(*) AS record_count
+FROM SILVER.DAILY_PRODUCTION_CLEAN
+GROUP BY
+    well_name,
+    production_date
+HAVING COUNT(*) > 1;
+```
+
+---
+
+# 5. Temporal Integrity
+
+Production and market data exist on different timelines.
+
+The project therefore validates:
+
+- Production dates
+- Brent price dates
+- FX dates
+- Date joins
+- Missing market dates
+
+For example, Brent benchmark prices may not exist for weekends or holidays.
+
+The analytical model therefore needs to account for the availability of market observations when joining production and price data.
+
+---
+
+# 6. Referential Integrity
+
+The production data should be associated with valid wells.
+
+The project checks relationships such as:
+
+```text
+FACT_PRODUCTION
+       |
+       v
+DIM_WELL
+```
+
+and:
+
+```text
+FACT_PRODUCTION
+       |
+       v
+DIM_DATE
+```
+
+The objective is to reduce orphan records in the analytical layer.
+
+---
+
+# 7. Production Checks
+
+Production values are checked for unusual or unexpected values.
+
+Examples include:
+
+- Extremely large production values
+- Unexpected negative production
+- Missing production
+- Long sequences of zero production
+- Abrupt changes in production
+
+These checks do not automatically classify an observation as incorrect.
+
+An unusual production value may represent a legitimate operational event.
+
+---
+
+# 8. Water Cut Checks
+
+Water cut is calculated as:
+
+```text
+Water
+-----------------
+Oil + Water
+```
+
+A denominator of zero must be handled safely.
+
+Conceptually:
+
+```sql
+DIVIDE(
+    water_volume,
+    NULLIF(oil_volume + water_volume, 0)
+)
+```
+
+This avoids invalid division when total liquid production is zero.
+
+Expected water-cut values should generally fall between:
+
+```text
+0 and 1
+```
+
+or:
+
+```text
+0% and 100%
+```
+
+---
+
+# 9. Brent Price Checks
+
+Brent price data is validated for:
+
+- Missing dates
+- Missing values
+- Duplicate observations
+- Invalid numeric values
+- Unexpected units
+
+The project expects Brent values to be expressed in:
+
+```text
+USD per barrel
+```
+
+---
+
+# 10. FX Data Checks
+
+The FX dataset is checked for:
+
+- Missing dates
+- Missing exchange rates
+- Duplicate observations
+- Invalid numeric values
+
+The expected currency pair is:
+
+```text
+USD → NOK
+```
+
+---
+
+# 11. Data Quality Workflow
+
+The overall approach is:
+
+```text
+Raw Data
+   ↓
+Profile
+   ↓
+Identify Issues
+   ↓
+Clean / Transform
+   ↓
+Validate
+   ↓
+Silver
+   ↓
+Business Transformation
+   ↓
+Gold
+```
+
+---
+
+# 12. Snowflake Profiling
+
+A Snowflake Python / pandas profiling exercise was developed as an additional learning component.
+
+The profiling examines:
+
+- DataFrame structure
+- Column data types
+- Missing values
+- Descriptive statistics
+- Basic distribution characteristics
+
+The profiling script is located under:
+
+```text
+snowflake/python/
+```
+
+---
+
+# 13. Limitations
+
+The data-quality framework is designed for a portfolio project.
+
+It is not intended to replace a full enterprise data-quality framework.
+
+The project does not implement:
+
+- Automated data-quality orchestration
+- Enterprise alerting
+- Data-quality dashboards
+- SLA monitoring
+- Data observability platforms
+- Automated incident management
+
+The focus is on demonstrating the underlying principles.
+
+---
+
+# 14. Data Quality Philosophy
+
+The project follows the principle:
+
+> **Do not assume that data is correct simply because it loaded successfully.**
+
+Successful ingestion only demonstrates that the data entered the platform.
+
+Analytical reliability requires additional validation of:
+
+- Structure
+- Completeness
+- Validity
+- Relationships
+- Time alignment
+- Business logic
